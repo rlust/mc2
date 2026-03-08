@@ -117,8 +117,10 @@
             <div class="service-info">
               <small>{{ service.description }}</small>
               <div class="service-port" v-if="service.port">Port: {{ service.port }}</div>
+              <div class="service-port" v-if="service.host">Host: {{ service.host }}</div>
             </div>
             <div class="service-actions">
+              <button v-if="service.key === 'ha-aspire' || service.key === 'ha-newark'" @click="openService(service)" class="btn-small">🌐 Open</button>
               <button @click="restartService(service)" class="btn-small">🔄 Restart</button>
               <button @click="viewLogs(service)" class="btn-small">📋 Logs</button>
               <button @click="checkStatus(service)" class="btn-small">✓ Check</button>
@@ -307,10 +309,13 @@ const vpsStats = ref({
 const backendBase = `${location.protocol}//${location.hostname}:3001`
 
 // Service config (stored in browser)
-const aspireHaHost = ref(localStorage.getItem('mc2.aspireHaHost') || '')
+const defaultAspireHaHost = 'ha-aspire-rvc-new.tail1f233.ts.net'
+const aspireHaHost = ref(localStorage.getItem('mc2.aspireHaHost') || defaultAspireHaHost)
 
 const saveServiceConfig = () => {
   localStorage.setItem('mc2.aspireHaHost', aspireHaHost.value.trim())
+  const aspire = services.value.find(s => s.key === 'ha-aspire')
+  if (aspire) aspire.host = aspireHaHost.value.trim()
 }
 
 // Running services
@@ -480,6 +485,17 @@ const viewLogs = (service) => {
       `OpenClaw logs: ~/.openclaw/logs/\n` +
       `Mission Control logs: ~/mission-control/logs/\n`
   )
+}
+
+const openService = (service) => {
+  if (!service?.host || !service?.port) {
+    alert('No host/port configured for this service.')
+    return
+  }
+
+  // Prefer http for HA; user provided http URL
+  const url = `http://${service.host}:${service.port}`
+  window.open(url, '_blank')
 }
 
 const checkStatus = async (service) => {
