@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { spawn } from 'child_process';
+import net from 'net';
 
 const app = express();
 app.use(cors());
@@ -37,6 +38,36 @@ app.get('/api/agents', async (req, res) => {
  } catch (e) {
  res.status(500).json({ error: e.message });
  }
+});
+
+
+// Simple TCP reachability check (used by Mission Control diagnostics UI)
+app.get('/api/tcp-check', async (req, res) => {
+  const host = String(req.query.host || '').trim();
+  const port = Number(req.query.port);
+  const timeoutMs = Math.min(10000, Number(req.query.timeoutMs || 1500));
+
+  if (!host || !Number.isFinite(port)) {
+    return res.status(400).json({ ok: false, error: 'host and port are required' });
+  }
+
+  const start = Date.now();
+  const socket = new net.Socket();
+  let done = false;
+
+  const finish = (ok, error) => {
+    if (done) return;
+    done = true;
+    try { socket.destroy(); } catch {}
+    res.json({ ok, host, port, ms: Date.now() - start, error: error || null });
+  };
+
+  socket.setTimeout(timeoutMs);
+  socket.once('connect', () => finish(true));
+  socket.once('timeout', () => finish(false, `timeout after ${timeoutMs}ms`));
+  socket.once('error', (err) => finish(false, err.message));
+
+  socket.connect(port, host);
 });
 
 app.listen(3001, () => console.log('🔴 Backend on http://localhost:3001'));

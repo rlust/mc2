@@ -92,6 +92,21 @@
       <!-- Services Status -->
       <div v-if="activeDiagTab === 'Services'" class="services-panel">
         <h2>🚀 Running Services</h2>
+
+        <div class="service-config">
+          <div class="config-row">
+            <label class="config-label">Aspire Home Assistant Host/IP</label>
+            <input
+              v-model="aspireHaHost"
+              class="config-input"
+              placeholder="e.g. 192.168.1.50 (only reachable when RV network/VPN is up)"
+            />
+            <button @click="saveServiceConfig" class="btn-small">Save</button>
+          </div>
+          <div class="config-hint">
+            Tip: If the RV is offline (no Wi‑Fi/VPN), Aspire will correctly show as OFFLINE.
+          </div>
+        </div>
         
         <div class="services-list">
           <div v-for="service in services" :key="service.name" class="service-card" :class="service.status">
@@ -104,9 +119,9 @@
               <div class="service-port" v-if="service.port">Port: {{ service.port }}</div>
             </div>
             <div class="service-actions">
-              <button @click="restartService(service.name)" class="btn-small">🔄 Restart</button>
-              <button @click="viewLogs(service.name)" class="btn-small">📋 Logs</button>
-              <button @click="checkStatus(service.name)" class="btn-small">✓ Check</button>
+              <button @click="restartService(service)" class="btn-small">🔄 Restart</button>
+              <button @click="viewLogs(service)" class="btn-small">📋 Logs</button>
+              <button @click="checkStatus(service)" class="btn-small">✓ Check</button>
             </div>
           </div>
         </div>
@@ -267,7 +282,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 
 // Active tab
 const activeDiagTab = ref('System')
@@ -288,15 +303,32 @@ const vpsStats = ref({
   status: 'healthy'
 })
 
+// Backend base URL (same machine as the Vite server)
+const backendBase = `${location.protocol}//${location.hostname}:3001`
+
+// Service config (stored in browser)
+const aspireHaHost = ref(localStorage.getItem('mc2.aspireHaHost') || '')
+
+const saveServiceConfig = () => {
+  localStorage.setItem('mc2.aspireHaHost', aspireHaHost.value.trim())
+}
+
 // Running services
 const services = ref([
-  { name: 'OpenClaw Gateway', icon: '🔴', description: 'Core gateway service', port: 18789, status: 'running' },
-  { name: 'Mission Control', icon: '🎯', description: 'Dashboard & monitoring', port: 5173, status: 'running' },
-  { name: 'LobsterBoard', icon: '🦞', description: 'Customizable dashboard', port: 8080, status: 'running' },
-  { name: 'Piwigo', icon: '📸', description: 'Photo gallery', port: 8080, status: 'running' },
-  { name: 'Home Assistant (Newark)', icon: '🏠', description: 'Smart home automation', port: 8123, status: 'running' },
-  { name: 'Home Assistant (Aspire)', icon: '🚐', description: 'RV automation', port: 8123, status: 'offline' }
+  { key: 'gateway', name: 'OpenClaw Gateway', icon: '🔴', description: 'Core gateway service', host: '127.0.0.1', port: 18789, status: 'running' },
+  { key: 'mission-control', name: 'Mission Control', icon: '🎯', description: 'Dashboard & monitoring', host: location.hostname, port: 5173, status: 'running' },
+  { key: 'lobsterboard', name: 'LobsterBoard', icon: '🦞', description: 'Customizable dashboard', host: location.hostname, port: 8080, status: 'running' },
+  { key: 'piwigo', name: 'Piwigo', icon: '📸', description: 'Photo gallery', host: location.hostname, port: 8080, status: 'running' },
+  { key: 'ha-newark', name: 'Home Assistant (Newark)', icon: '🏠', description: 'Smart home automation', host: '127.0.0.1', port: 8123, status: 'running' },
+  { key: 'ha-aspire', name: 'Home Assistant (Aspire)', icon: '🚐', description: 'RV automation', host: '', port: 8123, status: aspireHaHost.value ? 'offline' : 'unknown' }
 ])
+
+onMounted(() => {
+  const aspire = services.value.find(s => s.key === 'ha-aspire')
+  if (aspire && aspireHaHost.value.trim()) {
+    aspire.host = aspireHaHost.value.trim()
+  }
+})
 
 // API endpoints
 const apis = ref([
@@ -428,16 +460,68 @@ const runFullDiagnostics = () => {
   alert('Running full system diagnostic...\n\nThis would:\n✓ Check all services\n✓ Test all APIs\n✓ Verify connectivity\n✓ Generate report')
 }
 
-const restartService = (serviceName) => {
-  alert(`Restarting ${serviceName}...\n\nUse: systemctl restart ${serviceName.toLowerCase()}`)
+const restartService = (service) => {
+  // For now we keep this as a guided action (safer), not an automatic restart.
+  // Aspire HA is often offline because the RV network isn’t reachable.
+  const name = service?.name || 'service'
+  alert(
+    `Restart: ${name}\n\n` +
+      `Suggested actions:\n` +
+      `• If this is OpenClaw: run \'openclaw gateway restart\'\n` +
+      `• If this is Mission Control: restart the dev server (npm run dev)\n` +
+      `• If this is Home Assistant (Aspire): the RV must be online/reachable first\n`
+  )
 }
 
-const viewLogs = (serviceName) => {
-  alert(`Viewing logs for ${serviceName}...\n\nUse: tail -f ~/.openclaw/logs/${serviceName.toLowerCase()}.log`)
+const viewLogs = (service) => {
+  const name = service?.name || 'service'
+  alert(
+    `Logs: ${name}\n\n` +
+      `OpenClaw logs: ~/.openclaw/logs/\n` +
+      `Mission Control logs: ~/mission-control/logs/\n`
+  )
 }
 
-const checkStatus = (serviceName) => {
-  alert(`Checking status of ${serviceName}...`)
+const checkStatus = async (service) => {
+  if (!service) return
+
+  // Determine host to check
+  let host = service.host
+  if (service.key === 'ha-aspire') {
+    host = aspireHaHost.value.trim()
+    if (!host) {
+      service.status = 'unknown'
+      alert('Set Aspire Home Assistant Host/IP first (Services tab → Aspire Host/IP → Save).')
+      return
+    }
+    // keep service.host updated so UI reflects it
+    service.host = host
+  }
+
+  service.status = 'checking'
+
+  try {
+    const url = `${backendBase}/api/tcp-check?host=${encodeURIComponent(host)}&port=${encodeURIComponent(
+      service.port
+    )}&timeoutMs=1500`
+
+    const resp = await fetch(url)
+    const data = await resp.json()
+
+    service.status = data.ok ? 'running' : 'offline'
+
+    if (!data.ok) {
+      alert(
+        `${service.name} is not reachable at ${host}:${service.port}.\n\n` +
+          `Reason: ${data.error || 'unknown'}\n\n` +
+          `If this is Aspire: RV likely offline / not on VPN.\n` +
+          `If you *are* on the RV network, confirm the HA IP/port and try again.`
+      )
+    }
+  } catch (err) {
+    service.status = 'offline'
+    alert(`Check failed: ${err?.message || err}`)
+  }
 }
 
 const testAPI = (apiName) => {
@@ -641,6 +725,48 @@ h2 {
   color: #fca5a5;
 }
 
+.service-config {
+  background: #1a1f3a;
+  border: 1px solid #3b4a6f;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.config-row {
+  display: grid;
+  grid-template-columns: 220px 1fr 80px;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.config-label {
+  font-size: 0.85rem;
+  color: #94a3b8;
+  font-weight: bold;
+}
+
+.config-input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  background: #0f172a;
+  border: 1px solid #3b4a6f;
+  border-radius: 4px;
+  color: #e0e7ff;
+}
+
+.config-input:focus {
+  outline: none;
+  border-color: #10b981;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.15);
+}
+
+.config-hint {
+  margin-top: 0.5rem;
+  color: #64748b;
+  font-size: 0.8rem;
+}
+
 .services-list {
   display: flex;
   flex-direction: column;
@@ -661,6 +787,14 @@ h2 {
 .service-card.offline {
   border-left-color: #ef4444;
   opacity: 0.7;
+}
+
+.service-card.unknown {
+  border-left-color: #64748b;
+}
+
+.service-card.checking {
+  border-left-color: #f59e0b;
 }
 
 .service-header {
@@ -691,6 +825,16 @@ h2 {
 .service-card.offline .service-status-badge {
   background: #7f1d1d;
   color: #fca5a5;
+}
+
+.service-card.unknown .service-status-badge {
+  background: #334155;
+  color: #cbd5e1;
+}
+
+.service-card.checking .service-status-badge {
+  background: #78350f;
+  color: #fbbf24;
 }
 
 .service-info {
