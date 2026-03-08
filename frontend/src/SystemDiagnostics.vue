@@ -295,7 +295,7 @@ const services = ref([
   { name: 'LobsterBoard', icon: '🦞', description: 'Customizable dashboard', port: 8080, status: 'running' },
   { name: 'Piwigo', icon: '📸', description: 'Photo gallery', port: 8080, status: 'running' },
   { name: 'Home Assistant (Newark)', icon: '🏠', description: 'Smart home automation', port: 8123, status: 'running' },
-  { name: 'Home Assistant (Aspire)', icon: '🚐', description: 'RV automation', port: 8124, status: 'offline' }
+  { name: 'Home Assistant (Aspire)', icon: '🚐', description: 'RV automation', port: 8123, status: 'offline' }
 ])
 
 // API endpoints
