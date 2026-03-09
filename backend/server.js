@@ -8,9 +8,20 @@ import os from 'os';
 import { execSync } from 'child_process';
 import dotenv from 'dotenv';
 
-// Load environment variables
-dotenv.config({ path: '../.env' });
-dotenv.config({ path: '.env' });
+// Load environment variables from parent directory
+const envPath = path.resolve(process.cwd(), '..', '.env');
+console.log(`📁 Loading .env from: ${envPath}`);
+const result = dotenv.config({ path: envPath });
+if (result.error) {
+  console.warn(`⚠️ .env not found at ${envPath}, using defaults`);
+}
+
+// Debug: Log loaded variables
+console.log(`🔐 Env vars loaded:`);
+console.log(`   TELEGRAM_BOT_TOKEN: ${process.env.TELEGRAM_BOT_TOKEN ? '✅ SET' : '❌ NOT SET'}`);
+console.log(`   TELEGRAM_CHAT_ID: ${process.env.TELEGRAM_CHAT_ID ? '✅ SET' : '❌ NOT SET'}`);
+console.log(`   DISCORD_WEBHOOK_URL: ${process.env.DISCORD_WEBHOOK_URL ? '✅ SET' : '❌ NOT SET'}`);
+console.log(`   AUTO_RESTART: ${process.env.AUTO_RESTART || '❌ NOT SET'}`);
 
 // Token pricing (per 1M tokens)
 const PRICING = {
