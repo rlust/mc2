@@ -1,4 +1,48 @@
 <template>
+  <!-- Agent Detail Modal -->
+  <div v-if="showAgentDetail" class="modal-overlay" @click="closeAgentDetail">
+    <div class="modal-content" @click.stop>
+      <div class="modal-header">
+        <h2>{{ selectedAgent?.label }}</h2>
+        <button @click="closeAgentDetail" class="btn-close">✕</button>
+      </div>
+      
+      <div class="modal-body">
+        <div v-if="agentDetail?.error" class="error-message">
+          Error: {{ agentDetail.error }}
+        </div>
+        <div v-else-if="agentDetail">
+          <div class="detail-grid">
+            <div class="detail-item">
+              <span class="detail-label">Status</span>
+              <span class="detail-value">{{ agentDetail.status }}</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Model</span>
+              <span class="detail-value">{{ agentDetail.model }}</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Kind</span>
+              <span class="detail-value">{{ agentDetail.kind }}</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Messages</span>
+              <span class="detail-value">{{ agentDetail.messages }}</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Input Tokens</span>
+              <span class="detail-value">{{ agentDetail.tokens?.input }}</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Output Tokens</span>
+              <span class="detail-value">{{ agentDetail.tokens?.output }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="simple-dashboard">
     <!-- Header -->
     <div class="header">
@@ -102,7 +146,7 @@
         <div v-if="agents.length > 0" class="agents-detail">
           <h3>👥 Active Sessions</h3>
           <div class="agent-list">
-            <div v-for="agent in agents" :key="agent.id" class="agent-item">
+            <div v-for="agent in agents" :key="agent.id" class="agent-item" @click="viewAgentDetail(agent)">
               <div class="agent-header">
                 <span class="agent-label">{{ agent.label }}</span>
                 <span class="agent-status" :class="agent.status">{{ agent.status }}</span>
@@ -111,6 +155,7 @@
                 <small>Model: {{ agent.model }}</small>
                 <small>Kind: {{ agent.kind }}</small>
               </div>
+              <div class="agent-action">Click for details →</div>
             </div>
           </div>
         </div>
@@ -217,6 +262,9 @@ const tabs = ['Events', 'Context', 'Alerts', 'HVAC']
 const agents = ref([])
 const eventsList = ref([])
 const alertsList = ref([])
+const selectedAgent = ref(null)
+const agentDetail = ref(null)
+const showAgentDetail = ref(false)
 const backendUrl = computed(() => {
   const proto = location.protocol
   const host = location.hostname
@@ -272,6 +320,37 @@ const updateEventsList = () => {
   eventsList.value = newEvents.slice(0, 10) // Keep last 10 events
 }
 
+const fetchAlerts = async () => {
+  try {
+    const resp = await fetch(`${backendUrl.value}/api/alerts`)
+    const data = await resp.json()
+    alertsList.value = data.alerts || []
+  } catch (err) {
+    console.error('Failed to fetch alerts:', err)
+    alertsList.value = []
+  }
+}
+
+const viewAgentDetail = async (agent) => {
+  selectedAgent.value = agent
+  showAgentDetail.value = true
+  
+  try {
+    const resp = await fetch(`${backendUrl.value}/api/session/${agent.id}`)
+    const data = await resp.json()
+    agentDetail.value = data
+  } catch (err) {
+    console.error('Failed to fetch agent details:', err)
+    agentDetail.value = { error: err.message }
+  }
+}
+
+const closeAgentDetail = () => {
+  showAgentDetail.value = false
+  selectedAgent.value = null
+  agentDetail.value = null
+}
+
 // Methods
 const refreshData = async () => {
   loading.value = true
@@ -292,12 +371,17 @@ const sendCommand = () => {
 // Initialize on mount
 onMounted(() => {
   fetchAgents()
+  fetchAlerts()
   
   // Poll for updates every 5 seconds
-  const interval = setInterval(fetchAgents, 5000)
+  const agentInterval = setInterval(fetchAgents, 5000)
+  const alertInterval = setInterval(fetchAlerts, 8000)
   
   // Cleanup on unmount
-  return () => clearInterval(interval)
+  return () => {
+    clearInterval(agentInterval)
+    clearInterval(alertInterval)
+  }
 })
 </script>
 
@@ -601,6 +685,14 @@ onMounted(() => {
   border-left: 3px solid #10b981;
   border-radius: 4px;
   padding: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.agent-item:hover {
+  background: #252f48;
+  border-left-color: #06b6d4;
+  transform: translateX(2px);
 }
 
 .agent-header {
@@ -631,6 +723,14 @@ onMounted(() => {
   gap: 1rem;
   font-size: 0.8rem;
   color: #94a3b8;
+  margin-bottom: 0.5rem;
+}
+
+.agent-action {
+  font-size: 0.75rem;
+  color: #10b981;
+  font-weight: bold;
+  opacity: 0.8;
 }
 
 .timeline {
@@ -876,5 +976,111 @@ onMounted(() => {
   border-top: 1px solid #3b4a6f;
   color: #64748b;
   text-align: center;
+}
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease-in;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.modal-content {
+  background: #1a1f3a;
+  border: 1px solid #3b4a6f;
+  border-radius: 8px;
+  width: 90%;
+  max-width: 500px;
+  max-height: 70vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem;
+  border-bottom: 1px solid #3b4a6f;
+  background: linear-gradient(135deg, #1a1f3a 0%, #252f48 100%);
+}
+
+.modal-header h2 {
+  margin: 0;
+  color: #10b981;
+  font-size: 1.3rem;
+}
+
+.btn-close {
+  background: none;
+  border: none;
+  color: #94a3b8;
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.btn-close:hover {
+  color: #e0e7ff;
+  transform: scale(1.1);
+}
+
+.modal-body {
+  padding: 1.5rem;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.detail-item {
+  background: #0f172a;
+  padding: 1rem;
+  border-radius: 6px;
+  border: 1px solid #3b4a6f;
+}
+
+.detail-label {
+  display: block;
+  font-size: 0.75rem;
+  color: #94a3b8;
+  text-transform: uppercase;
+  margin-bottom: 0.5rem;
+  font-weight: bold;
+}
+
+.detail-value {
+  display: block;
+  font-size: 1.1rem;
+  color: #10b981;
+  font-weight: bold;
+}
+
+.error-message {
+  background: #7f1d1d;
+  color: #fca5a5;
+  padding: 1rem;
+  border-radius: 6px;
+  border: 1px solid #dc2626;
 }
 </style>
