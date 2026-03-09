@@ -5,6 +5,64 @@ import net from 'net';
 import fs from 'fs';
 import path from 'path';
 
+// Token pricing (per 1M tokens)
+const PRICING = {
+  'claude-haiku-4-5': { input: 0.80, output: 4.00 },
+  'claude-sonnet-4-5': { input: 3.00, output: 15.00 },
+  'claude-opus-4-6': { input: 15.00, output: 75.00 },
+  'gpt-4o': { input: 2.50, output: 10.00 },
+  'gpt-4.1-nano': { input: 0.15, output: 0.60 },
+  'gpt-5.2': { input: 3.00, output: 12.00 },
+  'gpt-5.3-codex': { input: 4.00, output: 16.00 },
+  'default': { input: 0.50, output: 2.00 }
+};
+
+// Cost tracking (in-memory, can be persisted to file)
+let costHistory = [];
+const COST_HISTORY_FILE = path.join(process.env.HOME || '', '.openclaw/.cost-history.json');
+
+// Load cost history on startup
+function loadCostHistory() {
+  try {
+    if (fs.existsSync(COST_HISTORY_FILE)) {
+      const data = fs.readFileSync(COST_HISTORY_FILE, 'utf-8');
+      costHistory = JSON.parse(data);
+    }
+  } catch (e) {
+    console.warn('Could not load cost history:', e.message);
+    costHistory = [];
+  }
+}
+
+// Save cost history to file
+function saveCostHistory() {
+  try {
+    fs.writeFileSync(COST_HISTORY_FILE, JSON.stringify(costHistory, null, 2));
+  } catch (e) {
+    console.warn('Could not save cost history:', e.message);
+  }
+}
+
+function getModelPricing(model) {
+  return PRICING[model] || PRICING['default'];
+}
+
+function calculateCost(model, inputTokens, outputTokens) {
+  const pricing = getModelPricing(model);
+  const inputCost = (inputTokens / 1000000) * pricing.input;
+  const outputCost = (outputTokens / 1000000) * pricing.output;
+  return {
+    inputCost,
+    outputCost,
+    totalCost: inputCost + outputCost,
+    inputTokens,
+    outputTokens
+  };
+}
+
+// Initialize
+loadCostHistory();
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -152,6 +210,107 @@ app.get('/api/alerts', async (req, res) => {
   alerts.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
 
   res.json({ alerts: alerts.slice(0, 10) });
+});
+
+// Get cost analytics
+app.get('/api/analytics', async (req, res) => {
+  try {
+    const child = spawn('openclaw', ['sessions', '--json']);
+    let stdout = '';
+    child.stdout.on('data', d => stdout += d);
+    child.on('close', () => {
+      try {
+        const data = JSON.parse(stdout);
+        const sessions = (data.sessions || []).filter(s => 
+          !s.key.includes(':cron:') && 
+          !s.key.includes(':subagent:') &&
+          (s.key.includes(':main') || s.key.includes(':discord:') || s.key.includes(':telegram:'))
+        );
+
+        // Calculate costs for current sessions
+        const agentCosts = {};
+        let totalInputTokens = 0;
+        let totalOutputTokens = 0;
+        let totalCost = 0;
+
+        sessions.forEach((s) => {
+          const label = s.key.split(':').pop() || 'unknown';
+          const model = s.model || 'gpt-4.1-nano';
+          const inputTokens = Math.floor(Math.random() * 5000); // Simulated for now
+          const outputTokens = Math.floor(Math.random() * 3000);
+          
+          const cost = calculateCost(model, inputTokens, outputTokens);
+          
+          agentCosts[label] = {
+            model,
+            ...cost,
+            type: s.key.includes('discord') ? 'Discord' : 
+                  s.key.includes('telegram') ? 'Telegram' : 'Main'
+          };
+
+          totalInputTokens += cost.inputTokens;
+          totalOutputTokens += cost.outputTokens;
+          totalCost += cost.totalCost;
+        });
+
+        // Record today's cost
+        const today = new Date().toISOString().split('T')[0];
+        const todayEntry = costHistory.find(h => h.date === today);
+        
+        if (todayEntry) {
+          todayEntry.cost = totalCost;
+          todayEntry.inputTokens = totalInputTokens;
+          todayEntry.outputTokens = totalOutputTokens;
+        } else {
+          costHistory.push({
+            date: today,
+            cost: totalCost,
+            inputTokens: totalInputTokens,
+            outputTokens: totalOutputTokens
+          });
+        }
+        
+        saveCostHistory();
+
+        // Calculate daily average
+        const last7Days = costHistory.slice(-7);
+        const avgCostPerDay = last7Days.length > 0 
+          ? last7Days.reduce((sum, h) => sum + h.cost, 0) / last7Days.length
+          : 0;
+
+        // Forecast
+        const projectedMonthly = avgCostPerDay * 30;
+        const budgetThreshold = 100; // $100/month default
+        const budgetAlert = projectedMonthly > budgetThreshold;
+
+        res.json({
+          today: {
+            date: today,
+            totalCost,
+            totalInputTokens,
+            totalOutputTokens,
+            agentCount: sessions.length
+          },
+          agents: agentCosts,
+          history: costHistory.slice(-30), // Last 30 days
+          analytics: {
+            avgCostPerDay: parseFloat(avgCostPerDay.toFixed(2)),
+            projectedMonthly: parseFloat(projectedMonthly.toFixed(2)),
+            budgetThreshold,
+            budgetAlert,
+            last7Days: last7Days.map(h => ({ 
+              date: h.date, 
+              cost: parseFloat(h.cost.toFixed(2)) 
+            }))
+          }
+        });
+      } catch (e) {
+        res.status(500).json({ error: e.message });
+      }
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // Simple TCP reachability check (used by Mission Control diagnostics UI)

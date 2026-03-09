@@ -229,6 +229,11 @@
           </div>
         </div>
       </div>
+
+      <!-- Costs Tab -->
+      <div v-if="activeTab === 'Costs'" class="costs-panel">
+        <CostAnalytics />
+      </div>
     </div>
 
     <!-- Footer -->
@@ -240,6 +245,7 @@
 
 <script setup>
 import { ref, onMounted, computed } from 'vue'
+import CostAnalytics from './CostAnalytics.vue'
 
 // State
 const isConnected = ref(true)
@@ -256,7 +262,7 @@ const lastUpdate = ref(new Date().toLocaleTimeString())
 const showDiagnostics = ref(false)
 const loading = ref(false)
 
-const tabs = ['Events', 'Context', 'Alerts', 'HVAC']
+const tabs = ['Events', 'Context', 'Alerts', 'HVAC', 'Costs']
 
 // Real OpenClaw data
 const agents = ref([])
