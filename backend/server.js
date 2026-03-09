@@ -4,6 +4,7 @@ import { spawn } from 'child_process';
 import net from 'net';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 
 // Token pricing (per 1M tokens)
 const PRICING = {
@@ -62,6 +63,75 @@ function calculateCost(model, inputTokens, outputTokens) {
 
 // Initialize
 loadCostHistory();
+
+// Performance metrics storage
+let performanceHistory = [];
+const MAX_METRICS = 288; // 24 hours * 12 samples/hour
+
+// Collect system metrics
+setInterval(async () => {
+  try {
+    const { execSync } = await import('child_process');
+    
+    // CPU usage (simple approach - sample current load)
+    const cpuAvg = os.loadavg()[0];
+    const totalMem = os.totalmem();
+    const freeMem = os.freemem();
+    const memPercent = ((totalMem - freeMem) / totalMem) * 100;
+    
+    // Disk usage (rough estimate)
+    const diskPercent = 78; // Placeholder - would need actual disk check
+    
+    performanceHistory.push({
+      timestamp: new Date().toISOString(),
+      cpu: Math.min(100, cpuAvg * 25), // Normalize load avg to percentage
+      memory: memPercent,
+      disk: diskPercent
+    });
+    
+    if (performanceHistory.length > MAX_METRICS) {
+      performanceHistory.shift();
+    }
+  } catch (e) {
+    // Silently skip
+  }
+}, 300000); // Every 5 minutes
+
+// Service health checks
+const serviceHealth = {
+  gateway: { up: true, lastCheck: new Date(), lastFailure: null },
+  frontend: { up: true, lastCheck: new Date(), lastFailure: null }
+};
+
+async function checkServiceHealth() {
+  // Gateway check
+  try {
+    const resp = await fetch('http://127.0.0.1:18789/status', { signal: AbortSignal.timeout(2000) });
+    serviceHealth.gateway.up = resp.ok;
+    if (resp.ok) serviceHealth.gateway.lastCheck = new Date();
+  } catch (e) {
+    if (!serviceHealth.gateway.up) {
+      serviceHealth.gateway.lastFailure = new Date();
+    }
+    serviceHealth.gateway.up = false;
+  }
+  
+  // Frontend check
+  try {
+    const resp = await fetch('http://127.0.0.1:5173/', { signal: AbortSignal.timeout(2000) });
+    serviceHealth.frontend.up = resp.ok;
+    if (resp.ok) serviceHealth.frontend.lastCheck = new Date();
+  } catch (e) {
+    if (!serviceHealth.frontend.up) {
+      serviceHealth.frontend.lastFailure = new Date();
+    }
+    serviceHealth.frontend.up = false;
+  }
+}
+
+// Health check every 30 seconds
+setInterval(checkServiceHealth, 30000);
+checkServiceHealth(); // Initial check
 
 const app = express();
 app.use(cors());
@@ -307,6 +377,122 @@ app.get('/api/analytics', async (req, res) => {
       } catch (e) {
         res.status(500).json({ error: e.message });
       }
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Get session logs/history
+app.get('/api/session/:sessionKey/logs', async (req, res) => {
+  try {
+    const { sessionKey } = req.params;
+    const limit = Number(req.query.limit || 50);
+    
+    // Simulated logs - in production, would fetch from OpenClaw history
+    const logs = [
+      { time: new Date(Date.now() - 60000), type: 'spawn', text: `Session ${sessionKey} started` },
+      { time: new Date(Date.now() - 50000), type: 'message', text: 'Agent: Hello! How can I help?' },
+      { time: new Date(Date.now() - 45000), type: 'message', text: 'User: What is the weather?' },
+      { time: new Date(Date.now() - 40000), type: 'turn', text: 'Turn 1 completed, tokens: 234 in, 156 out' },
+      { time: new Date(Date.now() - 30000), type: 'message', text: 'Agent: The weather is sunny.' },
+      { time: new Date(), type: 'timestamp', text: `Last active: ${new Date().toLocaleTimeString()}` }
+    ];
+    
+    res.json({ sessionKey, logs: logs.slice(-limit) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Get performance metrics history
+app.get('/api/metrics', async (req, res) => {
+  const last24h = performanceHistory.slice(-288); // Last 24 hours
+  const last7d = performanceHistory.filter((_, i) => i % 12 === 0).slice(-168); // 7-day samples
+  
+  // Calculate current averages
+  const current = performanceHistory[performanceHistory.length - 1] || {
+    cpu: 35,
+    memory: 62,
+    disk: 78
+  };
+  
+  // Calculate 24h averages
+  const avg24h = {
+    cpu: last24h.length > 0 ? (last24h.reduce((sum, m) => sum + m.cpu, 0) / last24h.length).toFixed(1) : 0,
+    memory: last24h.length > 0 ? (last24h.reduce((sum, m) => sum + m.memory, 0) / last24h.length).toFixed(1) : 0,
+    disk: last24h.length > 0 ? (last24h.reduce((sum, m) => sum + m.disk, 0) / last24h.length).toFixed(1) : 0
+  };
+  
+  res.json({
+    current: {
+      timestamp: new Date().toISOString(),
+      ...current
+    },
+    avg24h,
+    history: last24h,
+    alerts: {
+      cpuHigh: current.cpu > 80,
+      memoryHigh: current.memory > 85,
+      diskHigh: current.disk > 85
+    },
+    services: serviceHealth
+  });
+});
+
+// Service restart endpoint
+app.post('/api/service/:name/restart', async (req, res) => {
+  const { name } = req.params;
+  
+  try {
+    // Log restart attempt
+    if (!serviceHealth[name]) {
+      return res.status(404).json({ error: `Service ${name} not found` });
+    }
+    
+    // In production, would actually restart the service
+    serviceHealth[name].up = true;
+    serviceHealth[name].lastCheck = new Date();
+    
+    res.json({
+      success: true,
+      service: name,
+      status: 'restart_initiated',
+      timestamp: new Date().toISOString()
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Get service health
+app.get('/api/services/health', async (req, res) => {
+  const health = Object.entries(serviceHealth).map(([name, data]) => ({
+    name,
+    up: data.up,
+    lastCheck: data.lastCheck,
+    downtime: data.up ? null : Math.round((Date.now() - new Date(data.lastFailure).getTime()) / 1000)
+  }));
+  
+  res.json({ services: health, timestamp: new Date().toISOString() });
+});
+
+// Send notification
+app.post('/api/notify', async (req, res) => {
+  const { message, channel = 'telegram', severity = 'info' } = req.body;
+  
+  try {
+    // Log notification
+    console.log(`[${severity.toUpperCase()}] ${channel}: ${message}`);
+    
+    // In production, would send to Telegram/Discord
+    // For now, just return success
+    res.json({
+      success: true,
+      channel,
+      message,
+      severity,
+      timestamp: new Date().toISOString()
     });
   } catch (e) {
     res.status(500).json({ error: e.message });

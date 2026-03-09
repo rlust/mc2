@@ -1,6 +1,9 @@
 <template>
+  <!-- Monitoring Dashboard -->
+  <MonitoringDashboard v-if="showMonitoring" @back="showMonitoring = false" />
+
   <!-- Agent Detail Modal -->
-  <div v-if="showAgentDetail" class="modal-overlay" @click="closeAgentDetail">
+  <div v-if="showAgentDetail && !showMonitoring" class="modal-overlay" @click="closeAgentDetail">
     <div class="modal-content" @click.stop>
       <div class="modal-header">
         <h2>{{ selectedAgent?.label }}</h2>
@@ -49,6 +52,7 @@
       <h1>🔴 OpenClaw Control-UI</h1>
       <div class="header-actions">
         <button @click="refreshData" class="btn-header">🔄 Refresh</button>
+        <button @click="showMonitoring = true" class="btn-header btn-monitoring">🔍 Monitoring</button>
         <button @click="openDiagnostics" class="btn-header btn-diagnostics">🔧 Diagnostics</button>
         <div class="status-badge" :class="isConnected ? 'connected' : 'disconnected'">
           {{ isConnected ? '● Connected' : '○ Disconnected' }}
@@ -246,6 +250,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import CostAnalytics from './CostAnalytics.vue'
+import MonitoringDashboard from './MonitoringDashboard.vue'
 
 // State
 const isConnected = ref(true)
@@ -260,6 +265,7 @@ const hvacMode = ref('Heat')
 const lastCommand = ref('')
 const lastUpdate = ref(new Date().toLocaleTimeString())
 const showDiagnostics = ref(false)
+const showMonitoring = ref(false)
 const loading = ref(false)
 
 const tabs = ['Events', 'Context', 'Alerts', 'HVAC', 'Costs']
@@ -454,6 +460,17 @@ onMounted(() => {
 
 .btn-diagnostics:hover {
   background: #d97706;
+  color: #fff;
+}
+
+.btn-monitoring {
+  background: #06b6d4;
+  border-color: #0891b2;
+  color: #0f1419;
+}
+
+.btn-monitoring:hover {
+  background: #0891b2;
   color: #fff;
 }
 
