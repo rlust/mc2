@@ -934,4 +934,293 @@ app.get('/api/tcp-check', async (req, res) => {
   socket.connect(port, host);
 });
 
+// ============================================================================
+// HOME ASSISTANT INTEGRATION
+// ============================================================================
+
+// HA Configuration (set via env or hardcoded for testing)
+const HA_CONFIG = {
+  newark: {
+    url: process.env.NEWARK_HA_URL || 'https://rlust.ui.nabu.casa',
+    token: process.env.NEWARK_HA_TOKEN || '',
+    name: 'Newark Home'
+  },
+  aspire: {
+    url: process.env.ASPIRE_HA_URL || 'http://192.168.1.100:8123',
+    token: process.env.ASPIRE_HA_TOKEN || '',
+    name: 'Aspire RV'
+  }
+}
+
+// Get all entities from a HA instance
+const getHAEntities = async (instance = 'newark') => {
+  try {
+    if (!HA_CONFIG[instance].token) {
+      return { error: 'HA token not configured', instance }
+    }
+    
+    const config = HA_CONFIG[instance]
+    const response = await fetch(`${config.url}/api/states`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${config.token}`,
+        'Content-Type': 'application/json'
+      }
+    })
+    
+    if (!response.ok) {
+      return { error: `HA API error: ${response.status}`, instance }
+    }
+    
+    const states = await response.json()
+    
+    // Parse and organize by entity type
+    const organized = {
+      lights: [],
+      switches: [],
+      locks: [],
+      climate: [],
+      cameras: [],
+      other: []
+    }
+    
+    states.forEach(entity => {
+      const domain = entity.entity_id.split('.')[0]
+      const item = {
+        id: entity.entity_id,
+        name: entity.attributes.friendly_name || entity.entity_id,
+        state: entity.state,
+        attributes: entity.attributes
+      }
+      
+      switch (domain) {
+        case 'light':
+          organized.lights.push(item)
+          break
+        case 'switch':
+          organized.switches.push(item)
+          break
+        case 'lock':
+          organized.locks.push(item)
+          break
+        case 'climate':
+          organized.climate.push(item)
+          break
+        case 'camera':
+          organized.cameras.push(item)
+          break
+        default:
+          organized.other.push(item)
+      }
+    })
+    
+    return { instance, configured: true, ...organized }
+  } catch (e) {
+    console.error(`HA entities error (${instance}):`, e.message)
+    return { error: e.message, instance }
+  }
+}
+
+// Call a service on HA instance
+const callHAService = async (instance, domain, service, entityId, data = {}) => {
+  try {
+    if (!HA_CONFIG[instance].token) {
+      return { error: 'HA token not configured' }
+    }
+    
+    const config = HA_CONFIG[instance]
+    const response = await fetch(
+      `${config.url}/api/services/${domain}/${service}`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${config.token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          entity_id: entityId,
+          ...data
+        })
+      }
+    )
+    
+    if (!response.ok) {
+      const text = await response.text()
+      return { error: `HA API error: ${response.status}`, detail: text }
+    }
+    
+    const result = await response.json()
+    return { success: true, result }
+  } catch (e) {
+    console.error('HA service call error:', e.message)
+    return { error: e.message }
+  }
+}
+
+// Mock HA data for testing (when token not available)
+const getMockHAEntities = (instance = 'newark') => {
+  const mockData = {
+    newark: {
+      lights: [
+        { id: 'light.kitchen', name: 'Kitchen Light', state: 'on', attributes: { brightness: 200 } },
+        { id: 'light.living_room', name: 'Living Room', state: 'off', attributes: {} },
+        { id: 'light.bedroom', name: 'Bedroom Light', state: 'on', attributes: { brightness: 100 } }
+      ],
+      switches: [
+        { id: 'switch.garage_door', name: 'Garage Door', state: 'off', attributes: {} },
+        { id: 'switch.office_fan', name: 'Office Fan', state: 'on', attributes: {} }
+      ],
+      locks: [
+        { id: 'lock.front_door', name: 'Front Door', state: 'locked', attributes: {} },
+        { id: 'lock.back_door', name: 'Back Door', state: 'locked', attributes: {} }
+      ],
+      climate: [
+        { id: 'climate.living_room', name: 'Living Room', state: 'heating', attributes: { 
+          current_temperature: 68, 
+          target_temperature: 72,
+          hvac_modes: ['off', 'heat', 'cool', 'auto']
+        } }
+      ],
+      cameras: [
+        { id: 'camera.foyer', name: 'Foyer Camera', state: 'idle', attributes: {} }
+      ]
+    },
+    aspire: {
+      lights: [
+        { id: 'light.bedroom_light', name: 'Bedroom Light', state: 'off', attributes: {} },
+        { id: 'light.kitchen_light', name: 'Kitchen Light', state: 'on', attributes: { brightness: 150 } }
+      ],
+      switches: [],
+      locks: [],
+      climate: [
+        { id: 'climate.aspire_hvac', name: 'Aspire HVAC', state: 'idle', attributes: { 
+          current_temperature: 70, 
+          target_temperature: 70,
+          hvac_modes: ['off', 'heat', 'cool', 'auto']
+        } }
+      ],
+      cameras: [
+        { id: 'camera.aspire_rear', name: 'Aspire Rear', state: 'idle', attributes: {} }
+      ]
+    }
+  }
+  
+  return {
+    instance,
+    configured: false,
+    using_mock: true,
+    ...mockData[instance]
+  }
+}
+
+// GET /api/ha/config - Get HA configuration
+app.get('/api/ha/config', (req, res) => {
+  const instance = req.query.instance || 'newark'
+  const config = HA_CONFIG[instance]
+  
+  if (!config) {
+    return res.status(404).json({ error: 'Unknown HA instance' })
+  }
+  
+  res.json({
+    instance,
+    name: config.name,
+    url: config.url,
+    hasToken: !!config.token,
+    configured: !!config.token
+  })
+})
+
+// GET /api/ha/entities - Get all entities from HA
+app.get('/api/ha/entities', async (req, res) => {
+  const instance = req.query.instance || 'newark'
+  
+  // Try real HA first
+  const result = await getHAEntities(instance)
+  
+  // If no token or error, return mock data
+  if (result.error && !HA_CONFIG[instance].token) {
+    return res.json(getMockHAEntities(instance))
+  }
+  
+  res.json(result)
+})
+
+// POST /api/ha/call-service - Call a HA service
+app.post('/api/ha/call-service', async (req, res) => {
+  const { instance, domain, service, entityId, data } = req.body
+  
+  if (!instance || !domain || !service || !entityId) {
+    return res.status(400).json({ error: 'Missing required fields' })
+  }
+  
+  const result = await callHAService(instance, domain, service, entityId, data)
+  res.json(result)
+})
+
+// POST /api/ha/light-control - Control a light
+app.post('/api/ha/light-control', async (req, res) => {
+  const { instance, entityId, action, brightness } = req.body
+  
+  if (!instance || !entityId) {
+    return res.status(400).json({ error: 'Missing instance or entityId' })
+  }
+  
+  let service = 'turn_on'
+  let data = {}
+  
+  if (action === 'off') {
+    service = 'turn_off'
+  } else if (brightness !== undefined) {
+    data.brightness = Math.min(255, Math.max(0, brightness))
+  }
+  
+  const result = await callHAService(instance, 'light', service, entityId, data)
+  res.json(result)
+})
+
+// POST /api/ha/switch-control - Control a switch
+app.post('/api/ha/switch-control', async (req, res) => {
+  const { instance, entityId, action } = req.body
+  
+  if (!instance || !entityId) {
+    return res.status(400).json({ error: 'Missing instance or entityId' })
+  }
+  
+  const service = action === 'on' ? 'turn_on' : 'turn_off'
+  const result = await callHAService(instance, 'switch', service, entityId)
+  res.json(result)
+})
+
+// POST /api/ha/lock-control - Control a lock
+app.post('/api/ha/lock-control', async (req, res) => {
+  const { instance, entityId, action } = req.body
+  
+  if (!instance || !entityId) {
+    return res.status(400).json({ error: 'Missing instance or entityId' })
+  }
+  
+  const service = action === 'lock' ? 'lock' : 'unlock'
+  const result = await callHAService(instance, 'lock', service, entityId)
+  res.json(result)
+})
+
+// POST /api/ha/climate-control - Control climate/thermostat
+app.post('/api/ha/climate-control', async (req, res) => {
+  const { instance, entityId, targetTemp } = req.body
+  
+  if (!instance || !entityId) {
+    return res.status(400).json({ error: 'Missing instance or entityId' })
+  }
+  
+  const result = await callHAService(
+    instance,
+    'climate',
+    'set_temperature',
+    entityId,
+    { temperature: targetTemp }
+  )
+  res.json(result)
+})
+
 app.listen(3001, () => console.log('🔴 Backend on http://localhost:3001'));

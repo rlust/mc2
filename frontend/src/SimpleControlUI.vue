@@ -234,6 +234,11 @@
         </div>
       </div>
 
+      <!-- Home Tab -->
+      <div v-if="activeTab === 'Home'" class="home-panel">
+        <HAControlPanel />
+      </div>
+
       <!-- Costs Tab -->
       <div v-if="activeTab === 'Costs'" class="costs-panel">
         <CostAnalytics />
@@ -252,6 +257,7 @@ import { ref, onMounted, computed } from 'vue'
 import CostAnalytics from './CostAnalytics.vue'
 import MonitoringDashboard from './MonitoringDashboard.vue'
 import TranscriptViewer from './TranscriptViewer.vue'
+import HAControlPanel from './HAControlPanel.vue'
 
 // Discord channel ID to name mapping
 const discordChannelNames = {
@@ -296,7 +302,7 @@ const showDiagnostics = ref(false)
 const showMonitoring = ref(false)
 const loading = ref(false)
 
-const tabs = ['Events', 'Context', 'Alerts', 'HVAC', 'Costs']
+const tabs = ['Events', 'Context', 'Alerts', 'Home', 'HVAC', 'Costs']
 
 // Real OpenClaw data
 const agents = ref([])
