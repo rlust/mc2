@@ -251,6 +251,7 @@
 import { ref, onMounted, computed } from 'vue'
 import CostAnalytics from './CostAnalytics.vue'
 import MonitoringDashboard from './MonitoringDashboard.vue'
+import TranscriptViewer from './TranscriptViewer.vue'
 
 // Discord channel ID to name mapping
 const discordChannelNames = {
