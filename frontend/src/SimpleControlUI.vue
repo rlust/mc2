@@ -256,8 +256,18 @@ import MonitoringDashboard from './MonitoringDashboard.vue'
 const discordChannelNames = {
   '1395422423997747324': '#general',
   '1395503333208232048': '#general',
-  '1475927527749997610': '#codie',
-  '1475929497827020811': '#alerts'
+  '1475563761548005608': '#general',
+  '1475927527749976105': '#codie',
+  '1475929497827020811': '#alerts',
+  '1476004276311560345': '#HAL',
+  '1476004277666189534': '#unknown',
+  '1476004279067345127': '#Kim',
+  '1476004280275177685': '#unknown',
+  '1476004282041106530': '#unknown',
+  '1476004285547417797': '#unknown',
+  '1476004291859714189': '#unknown',
+  '1476004296079183884': '#unknown',
+  '1476023705900552228': '#unknown'
 }
 
 // Helper function to get Discord channel name
