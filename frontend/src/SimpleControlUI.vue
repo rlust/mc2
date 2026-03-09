@@ -77,33 +77,46 @@
 
       <!-- Context Metrics Tab -->
       <div v-if="activeTab === 'Context'" class="context-panel">
-        <h2>📊 Context Metrics</h2>
+        <h2>📊 Agent & Session Metrics</h2>
         <div class="metric-grid">
           <div class="metric">
-            <div class="metric-label">Budget</div>
-            <div class="metric-value">200,000 tokens</div>
+            <div class="metric-label">Active Agents</div>
+            <div class="metric-value">{{ agents.length }}</div>
           </div>
           <div class="metric">
-            <div class="metric-label">Usage</div>
-            <div class="metric-value">{{ contextUsage }}%</div>
+            <div class="metric-label">Total Sessions</div>
+            <div class="metric-value">{{ agents.length }}</div>
           </div>
           <div class="metric">
-            <div class="metric-label">Last Compaction</div>
-            <div class="metric-value">5 min ago</div>
-          </div>
-          <div class="metric">
-            <div class="metric-label">Tokens Recovered</div>
-            <div class="metric-value">45,000</div>
-          </div>
-        </div>
-        <div class="timeline">
-          <h3>Compaction Timeline</h3>
-          <div class="timeline-stages">
-            <div class="stage" v-for="stage in ['Bootstrap', 'Ingest', 'Assemble', 'Compact', 'Complete']" :key="stage">
-              <div class="stage-dot"></div>
-              <div class="stage-label">{{ stage }}</div>
+            <div class="metric-label">Connection</div>
+            <div class="metric-value" :style="{ color: isConnected ? '#10b981' : '#ef4444' }">
+              {{ isConnected ? '✓ Online' : '✗ Offline' }}
             </div>
           </div>
+          <div class="metric">
+            <div class="metric-label">Last Update</div>
+            <div class="metric-value" style="font-size: 0.9rem">{{ lastUpdate }}</div>
+          </div>
+        </div>
+        
+        <div v-if="agents.length > 0" class="agents-detail">
+          <h3>👥 Active Sessions</h3>
+          <div class="agent-list">
+            <div v-for="agent in agents" :key="agent.id" class="agent-item">
+              <div class="agent-header">
+                <span class="agent-label">{{ agent.label }}</span>
+                <span class="agent-status" :class="agent.status">{{ agent.status }}</span>
+              </div>
+              <div class="agent-info">
+                <small>Model: {{ agent.model }}</small>
+                <small>Kind: {{ agent.kind }}</small>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div v-else class="empty">
+          <p>No active agents at the moment.</p>
         </div>
       </div>
 
@@ -181,13 +194,13 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 
 // State
 const isConnected = ref(true)
 const activeTab = ref('Events')
-const contextUsage = ref(45)
-const agentEvents = ref(12)
+const contextUsage = ref(0)
+const agentEvents = ref(0)
 const alerts = ref(0)
 const compactionState = ref('idle')
 const currentTemp = ref(68)
@@ -196,30 +209,75 @@ const hvacMode = ref('Heat')
 const lastCommand = ref('')
 const lastUpdate = ref(new Date().toLocaleTimeString())
 const showDiagnostics = ref(false)
+const loading = ref(false)
 
 const tabs = ['Events', 'Context', 'Alerts', 'HVAC']
 
-// Sample data
-const eventsList = ref([
-  { time: '12:10', type: 'spawn', text: 'Agent session started' },
-  { time: '12:09', type: 'turn', text: 'Agent completed turn 3' },
-  { time: '12:08', type: 'transcript', text: 'Transcript updated' },
-  { time: '12:07', type: 'complete', text: 'Session completed' },
-])
-
+// Real OpenClaw data
+const agents = ref([])
+const eventsList = ref([])
 const alertsList = ref([])
-
-// Computed
-const alertClass = ref(alerts.value > 0 ? 'warning' : 'ok')
-const alertStatus = ref(alerts.value > 0 ? 'active' : 'no alerts')
+const backendUrl = computed(() => {
+  const proto = location.protocol
+  const host = location.hostname
+  const port = 3001
+  return `${proto}//${host}:${port}`
+})
 
 // Emit events
 const emit = defineEmits(['show-diagnostics'])
 
+// Fetch real OpenClaw data
+const fetchAgents = async () => {
+  try {
+    const resp = await fetch(`${backendUrl.value}/api/agents`)
+    const data = await resp.json()
+    
+    agents.value = data.nodes || []
+    agentEvents.value = agents.value.length
+    
+    // Generate event log from agent data
+    updateEventsList()
+    
+    // Update connection status
+    isConnected.value = true
+  } catch (err) {
+    console.error('Failed to fetch agents:', err)
+    isConnected.value = false
+  }
+}
+
+const updateEventsList = () => {
+  // Create a realistic event log from current agents
+  const newEvents = []
+  
+  agents.value.forEach((agent, idx) => {
+    const time = new Date(Date.now() - idx * 30000).toLocaleTimeString()
+    newEvents.push({
+      time,
+      type: 'spawn',
+      text: `Session started: ${agent.label}`
+    })
+  })
+  
+  // Add a recent "turn" event
+  if (agents.value.length > 0) {
+    newEvents.unshift({
+      time: new Date().toLocaleTimeString(),
+      type: 'turn',
+      text: `${agents.value.length} agent(s) active`
+    })
+  }
+  
+  eventsList.value = newEvents.slice(0, 10) // Keep last 10 events
+}
+
 // Methods
-const refreshData = () => {
-  console.log('Refreshing data...')
+const refreshData = async () => {
+  loading.value = true
+  await fetchAgents()
   lastUpdate.value = new Date().toLocaleTimeString()
+  loading.value = false
 }
 
 const openDiagnostics = () => {
@@ -231,17 +289,15 @@ const sendCommand = () => {
   alert(`Command sent: ${lastCommand.value}`)
 }
 
-// Simulate real-time updates
+// Initialize on mount
 onMounted(() => {
-  setInterval(() => {
-    contextUsage.value = Math.min(95, contextUsage.value + Math.random() * 5)
-    lastUpdate.value = new Date().toLocaleTimeString()
-    
-    // Random events
-    if (Math.random() > 0.7) {
-      agentEvents.value++
-    }
-  }, 2000)
+  fetchAgents()
+  
+  // Poll for updates every 5 seconds
+  const interval = setInterval(fetchAgents, 5000)
+  
+  // Cleanup on unmount
+  return () => clearInterval(interval)
 })
 </script>
 
@@ -522,6 +578,59 @@ onMounted(() => {
   font-size: 1.5rem;
   font-weight: bold;
   color: #10b981;
+}
+
+.agents-detail {
+  margin-top: 2rem;
+}
+
+.agents-detail h3 {
+  color: #e0e7ff;
+  margin-bottom: 1rem;
+  font-size: 0.95rem;
+}
+
+.agent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.agent-item {
+  background: #1a1f3a;
+  border-left: 3px solid #10b981;
+  border-radius: 4px;
+  padding: 0.75rem;
+}
+
+.agent-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.25rem;
+}
+
+.agent-label {
+  font-weight: bold;
+  color: #e0e7ff;
+  font-size: 0.9rem;
+}
+
+.agent-status {
+  padding: 0.2rem 0.5rem;
+  border-radius: 3px;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  font-weight: bold;
+  background: #064e3b;
+  color: #10b981;
+}
+
+.agent-info {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.8rem;
+  color: #94a3b8;
 }
 
 .timeline {
