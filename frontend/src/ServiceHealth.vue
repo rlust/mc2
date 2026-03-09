@@ -2,6 +2,11 @@
   <div class="service-health">
     <h3>🔧 Service Auto-Recovery</h3>
     
+    <div class="auto-restart-banner">
+      <span>🔄 Auto-Restart: {{ autoRestartEnabled ? '✅ ENABLED' : '⭕ DISABLED' }}</span>
+      <span class="banner-note">Services auto-restart after 1 minute downtime</span>
+    </div>
+    
     <div class="services-list">
       <div v-for="service in services" :key="service.name" class="service-card" :class="{ down: !service.up }">
         <div class="service-header">
@@ -54,6 +59,7 @@ import { ref, onMounted } from 'vue'
 const services = ref([])
 const restarting = ref({})
 const restartLog = ref([])
+const autoRestartEnabled = ref(false)
 const backendUrl = `${location.protocol}//${location.hostname}:3001`
 
 const fetchServices = async () => {
@@ -120,6 +126,26 @@ onMounted(() => {
   background: #1a1f3a;
   border: 1px solid #3b4a6f;
   border-radius: 6px;
+}
+
+.auto-restart-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem;
+  background: #064e3b;
+  border: 1px solid #10b981;
+  border-radius: 4px;
+  margin-bottom: 1rem;
+  font-weight: bold;
+  color: #10b981;
+  font-size: 0.9rem;
+}
+
+.banner-note {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  font-weight: normal;
 }
 
 h3 {

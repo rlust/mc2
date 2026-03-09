@@ -5,6 +5,12 @@ import net from 'net';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { execSync } from 'child_process';
+import dotenv from 'dotenv';
+
+// Load environment variables
+dotenv.config({ path: '../.env' });
+dotenv.config({ path: '.env' });
 
 // Token pricing (per 1M tokens)
 const PRICING = {
@@ -132,6 +138,38 @@ async function checkServiceHealth() {
 // Health check every 30 seconds
 setInterval(checkServiceHealth, 30000);
 checkServiceHealth(); // Initial check
+
+// Auto-restart failed services (if enabled)
+const AUTO_RESTART_ENABLED = process.env.AUTO_RESTART === 'true';
+const AUTO_RESTART_RETRY_COUNT = {};
+
+setInterval(async () => {
+  if (!AUTO_RESTART_ENABLED) return;
+  
+  for (const [serviceName, health] of Object.entries(serviceHealth)) {
+    if (!health.up) {
+      AUTO_RESTART_RETRY_COUNT[serviceName] = (AUTO_RESTART_RETRY_COUNT[serviceName] || 0) + 1;
+      
+      // Auto-restart after 2 failed checks (1 minute downtime)
+      if (AUTO_RESTART_RETRY_COUNT[serviceName] >= 2) {
+        console.log(`🔄 Auto-restarting ${serviceName}...`);
+        
+        try {
+          // Trigger restart via API call
+          await fetch('http://127.0.0.1:3001/api/service/' + serviceName + '/restart', {
+            method: 'POST'
+          });
+          
+          AUTO_RESTART_RETRY_COUNT[serviceName] = 0;
+        } catch (e) {
+          console.error(`Auto-restart failed for ${serviceName}:`, e.message);
+        }
+      }
+    } else {
+      AUTO_RESTART_RETRY_COUNT[serviceName] = 0;
+    }
+  }
+}, 30000); // Every 30 seconds
 
 const app = express();
 app.use(cors());
@@ -440,24 +478,67 @@ app.get('/api/metrics', async (req, res) => {
   });
 });
 
-// Service restart endpoint
+// Service restart endpoint (real restart logic)
 app.post('/api/service/:name/restart', async (req, res) => {
   const { name } = req.params;
   
   try {
-    // Log restart attempt
     if (!serviceHealth[name]) {
       return res.status(404).json({ error: `Service ${name} not found` });
     }
     
-    // In production, would actually restart the service
-    serviceHealth[name].up = true;
-    serviceHealth[name].lastCheck = new Date();
+    let success = false;
+    let output = '';
+    let error = '';
+    
+    try {
+      // Kill existing process
+      if (name === 'gateway') {
+        // Kill OpenClaw gateway (port 18789)
+        execSync('lsof -ti:18789 | xargs kill -9 2>/dev/null || true', { timeout: 5000 });
+        await new Promise(r => setTimeout(r, 2000));
+        // Restart gateway
+        execSync('openclaw gateway restart 2>&1', { timeout: 10000 });
+        output = 'Gateway restarted';
+        success = true;
+      } else if (name === 'frontend') {
+        // Kill Vite dev server
+        execSync('pkill -f "vite" 2>/dev/null || true', { timeout: 5000 });
+        await new Promise(r => setTimeout(r, 1000));
+        // Restart frontend
+        const cwd = '/Users/randylust/mission-control/frontend';
+        execSync(`cd ${cwd} && npm run dev > ../logs/frontend.log 2>&1 &`, { timeout: 5000 });
+        output = 'Frontend restarted';
+        success = true;
+      }
+    } catch (execError) {
+      error = execError.message;
+      console.error(`Restart error for ${name}:`, execError);
+    }
+    
+    // Update service health
+    if (success) {
+      serviceHealth[name].up = true;
+      serviceHealth[name].lastCheck = new Date();
+      
+      // Send notification
+      await fetch('http://127.0.0.1:3001/api/notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: `Service restarted: ${name}`,
+          channel: 'telegram',
+          severity: 'info'
+        })
+      }).catch(() => {});
+    }
     
     res.json({
-      success: true,
+      success,
       service: name,
-      status: 'restart_initiated',
+      status: success ? 'restarted' : 'failed',
+      output,
+      error: error || undefined,
       timestamp: new Date().toISOString()
     });
   } catch (e) {
@@ -477,22 +558,99 @@ app.get('/api/services/health', async (req, res) => {
   res.json({ services: health, timestamp: new Date().toISOString() });
 });
 
-// Send notification
+// Send notification (Telegram + Discord support)
 app.post('/api/notify', async (req, res) => {
   const { message, channel = 'telegram', severity = 'info' } = req.body;
   
   try {
-    // Log notification
-    console.log(`[${severity.toUpperCase()}] ${channel}: ${message}`);
+    const severityEmoji = {
+      'info': 'ℹ️',
+      'warning': '⚠️',
+      'critical': '🚨'
+    };
     
-    // In production, would send to Telegram/Discord
-    // For now, just return success
+    const emoji = severityEmoji[severity] || 'ℹ️';
+    const formattedMsg = `${emoji} [${severity.toUpperCase()}] ${message}`;
+    
+    let sent = false;
+    
+    // Send to Telegram
+    if (channel === 'telegram' || channel === 'both') {
+      const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
+      const telegramChatId = process.env.TELEGRAM_CHAT_ID;
+      
+      if (telegramToken && telegramChatId) {
+        try {
+          const response = await fetch(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: telegramChatId,
+              text: formattedMsg,
+              parse_mode: 'HTML'
+            })
+          });
+          
+          if (response.ok) {
+            console.log(`✅ Telegram notification sent: ${formattedMsg}`);
+            sent = true;
+          } else {
+            console.error(`Telegram API error: ${response.status}`);
+          }
+        } catch (e) {
+          console.error(`Telegram send failed: ${e.message}`);
+        }
+      } else {
+        console.warn('Telegram credentials not set. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID env vars.');
+      }
+    }
+    
+    // Send to Discord
+    if (channel === 'discord' || channel === 'both') {
+      const discordWebhook = process.env.DISCORD_WEBHOOK_URL;
+      
+      if (discordWebhook) {
+        try {
+          const colorMap = {
+            'info': 3447003,      // Blue
+            'warning': 16776960,  // Yellow
+            'critical': 16711680  // Red
+          };
+          
+          const response = await fetch(discordWebhook, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              embeds: [{
+                title: `${emoji} ${severity.toUpperCase()}`,
+                description: message,
+                color: colorMap[severity],
+                timestamp: new Date().toISOString()
+              }]
+            })
+          });
+          
+          if (response.ok) {
+            console.log(`✅ Discord notification sent: ${formattedMsg}`);
+            sent = true;
+          } else {
+            console.error(`Discord API error: ${response.status}`);
+          }
+        } catch (e) {
+          console.error(`Discord send failed: ${e.message}`);
+        }
+      } else {
+        console.warn('Discord webhook not set. Set DISCORD_WEBHOOK_URL env var.');
+      }
+    }
+    
     res.json({
-      success: true,
+      success: sent,
       channel,
-      message,
+      message: formattedMsg,
       severity,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      note: sent ? 'Sent successfully' : 'No credentials configured'
     });
   } catch (e) {
     res.status(500).json({ error: e.message });

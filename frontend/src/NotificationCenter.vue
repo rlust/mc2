@@ -67,6 +67,44 @@
         <input v-model="summaryTime" type="time" class="time-input" />
         <small>Send daily cost summary at this time</small>
       </div>
+
+      <div class="config-section">
+        <h4>Auto-Restart Services</h4>
+        <label class="checkbox-option">
+          <input type="checkbox" v-model="autoRestartEnabled" />
+          <span>Enable auto-restart (restarts down services after 1 min)</span>
+        </label>
+        <small v-if="autoRestartEnabled" class="info-text">
+          ℹ️ When enabled, services are automatically restarted if down for >60 seconds
+        </small>
+      </div>
+
+      <div class="config-section">
+        <h4>⚙️ Setup Instructions</h4>
+        <button @click="showCredentialsHelp = !showCredentialsHelp" class="btn-help">
+          {{ showCredentialsHelp ? '📋 Hide Setup' : '📋 Show Setup' }}
+        </button>
+        
+        <div v-if="showCredentialsHelp" class="credentials-help">
+          <h5>🤖 Telegram Setup</h5>
+          <p>1. Create bot via <strong>@BotFather</strong> on Telegram</p>
+          <p>2. Get your Chat ID via <strong>@userinfobot</strong></p>
+          <p>3. Set environment variables:</p>
+          <code>export TELEGRAM_BOT_TOKEN="your_bot_token"<br/>export TELEGRAM_CHAT_ID="your_chat_id"</code>
+          
+          <h5>💬 Discord Setup</h5>
+          <p>1. Create webhook in Discord server settings</p>
+          <p>2. Copy webhook URL</p>
+          <p>3. Set environment variable:</p>
+          <code>export DISCORD_WEBHOOK_URL="your_webhook_url"</code>
+          
+          <h5>🔄 Restart Backend</h5>
+          <p>After setting env vars, restart the backend:</p>
+          <code>pkill -f "node server.js"<br/>cd ~/mission-control/backend && npm run dev &</code>
+          
+          <p class="note">✅ Test buttons will work once credentials are configured</p>
+        </div>
+      </div>
     </div>
 
     <!-- Notification History -->
@@ -97,7 +135,10 @@ const alerts = ref({
 const preferredChannel = ref('telegram')
 const summaryTime = ref('08:00')
 const notificationHistory = ref([])
+const autoRestartEnabled = ref(false)
 const backendUrl = `${location.protocol}//${location.hostname}:3001`
+
+const showCredentialsHelp = ref(false)
 
 const sendNotification = async (channel, severity) => {
   const messages = {
@@ -180,6 +221,89 @@ h4 {
   padding: 0.75rem;
   border-radius: 4px;
   border: 1px solid #3b4a6f;
+}
+
+.checkbox-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: #cbd5e1;
+}
+
+.checkbox-option input {
+  cursor: pointer;
+}
+
+.info-text {
+  display: block;
+  margin-top: 0.5rem;
+  color: #06b6d4;
+  font-style: italic;
+}
+
+.btn-help {
+  padding: 0.4rem 0.8rem;
+  background: #3b4a6f;
+  border: 1px solid #4f6095;
+  border-radius: 3px;
+  color: #e0e7ff;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: bold;
+  transition: all 0.2s;
+  width: 100%;
+}
+
+.btn-help:hover {
+  background: #4f6095;
+}
+
+.credentials-help {
+  margin-top: 1rem;
+  background: #0a0e27;
+  border: 1px solid #3b4a6f;
+  border-radius: 4px;
+  padding: 1rem;
+  font-size: 0.8rem;
+  color: #cbd5e1;
+}
+
+.credentials-help h5 {
+  margin: 1rem 0 0.5rem 0;
+  color: #10b981;
+  font-weight: bold;
+}
+
+.credentials-help h5:first-child {
+  margin-top: 0;
+}
+
+.credentials-help p {
+  margin: 0.5rem 0;
+  line-height: 1.4;
+}
+
+.credentials-help code {
+  display: block;
+  background: #0f172a;
+  border: 1px solid #3b4a6f;
+  border-radius: 3px;
+  padding: 0.5rem;
+  margin: 0.5rem 0;
+  font-family: monospace;
+  color: #10b981;
+  overflow-x: auto;
+}
+
+.credentials-help .note {
+  margin-top: 1rem;
+  padding: 0.5rem;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid #10b981;
+  border-radius: 3px;
+  color: #10b981;
 }
 
 .button-group {
