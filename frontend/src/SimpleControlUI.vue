@@ -6,7 +6,7 @@
   <div v-if="showAgentDetail && !showMonitoring" class="modal-overlay" @click="closeAgentDetail">
     <div class="modal-content" @click.stop>
       <div class="modal-header">
-        <h2>{{ selectedAgent?.label }}</h2>
+        <h2>{{ getChannelName(selectedAgent?.label || '') }}</h2>
         <button @click="closeAgentDetail" class="btn-close">✕</button>
       </div>
       
@@ -152,7 +152,7 @@
           <div class="agent-list">
             <div v-for="agent in agents" :key="agent.id" class="agent-item" @click="viewAgentDetail(agent)">
               <div class="agent-header">
-                <span class="agent-label">{{ agent.label }}</span>
+                <span class="agent-label">{{ getChannelName(agent.label) }}</span>
                 <span class="agent-status" :class="agent.status">{{ agent.status }}</span>
               </div>
               <div class="agent-info">
@@ -251,6 +251,21 @@
 import { ref, onMounted, computed } from 'vue'
 import CostAnalytics from './CostAnalytics.vue'
 import MonitoringDashboard from './MonitoringDashboard.vue'
+
+// Discord channel ID to name mapping
+const discordChannelNames = {
+  '1395422423997747324': '#general',
+  '1395503333208232048': '#general',
+  '1475927527749997610': '#codie',
+  '1475929497827020811': '#alerts'
+}
+
+// Helper function to get Discord channel name
+const getChannelName = (label) => {
+  if (!label.startsWith('Discord:')) return label
+  const channelId = label.replace('Discord: ', '')
+  return `Discord: ${discordChannelNames[channelId] || channelId}`
+}
 
 // State
 const isConnected = ref(true)
