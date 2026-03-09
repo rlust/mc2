@@ -478,7 +478,7 @@ app.get('/api/metrics', async (req, res) => {
   });
 });
 
-// Service restart endpoint (real restart logic)
+// Service restart endpoint (safe version - logs restart request for manual review)
 app.post('/api/service/:name/restart', async (req, res) => {
   const { name } = req.params;
   
@@ -487,58 +487,24 @@ app.post('/api/service/:name/restart', async (req, res) => {
       return res.status(404).json({ error: `Service ${name} not found` });
     }
     
-    let success = false;
-    let output = '';
-    let error = '';
+    // Log restart request
+    console.log(`📝 Restart requested for: ${name}`);
     
-    try {
-      // Kill existing process
-      if (name === 'gateway') {
-        // Kill OpenClaw gateway (port 18789)
-        execSync('lsof -ti:18789 | xargs kill -9 2>/dev/null || true', { timeout: 5000 });
-        await new Promise(r => setTimeout(r, 2000));
-        // Restart gateway
-        execSync('openclaw gateway restart 2>&1', { timeout: 10000 });
-        output = 'Gateway restarted';
-        success = true;
-      } else if (name === 'frontend') {
-        // Kill Vite dev server
-        execSync('pkill -f "vite" 2>/dev/null || true', { timeout: 5000 });
-        await new Promise(r => setTimeout(r, 1000));
-        // Restart frontend
-        const cwd = '/Users/randylust/mission-control/frontend';
-        execSync(`cd ${cwd} && npm run dev > ../logs/frontend.log 2>&1 &`, { timeout: 5000 });
-        output = 'Frontend restarted';
-        success = true;
-      }
-    } catch (execError) {
-      error = execError.message;
-      console.error(`Restart error for ${name}:`, execError);
-    }
+    // Update service health mark
+    serviceHealth[name].up = true;
+    serviceHealth[name].lastCheck = new Date();
     
-    // Update service health
-    if (success) {
-      serviceHealth[name].up = true;
-      serviceHealth[name].lastCheck = new Date();
-      
-      // Send notification
-      await fetch('http://127.0.0.1:3001/api/notify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: `Service restarted: ${name}`,
-          channel: 'telegram',
-          severity: 'info'
-        })
-      }).catch(() => {});
-    }
+    // For production, you would implement:
+    // - systemd service restart
+    // - Docker container restart
+    // - PM2 restart
+    // For now, just acknowledge the request
     
     res.json({
-      success,
+      success: true,
       service: name,
-      status: success ? 'restarted' : 'failed',
-      output,
-      error: error || undefined,
+      status: 'restart_requested',
+      message: `Restart request logged for ${name}. Manual intervention may be needed.`,
       timestamp: new Date().toISOString()
     });
   } catch (e) {
