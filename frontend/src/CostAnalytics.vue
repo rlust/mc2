@@ -104,6 +104,18 @@
       </div>
     </div>
 
+    <!-- Daily Report Section -->
+    <div class="daily-report-section">
+      <h3>📊 Daily Report</h3>
+      <p>Send today's cost summary to Discord (includes 7-day trend chart)</p>
+      <button @click="sendDailyReport" class="btn-send-report" :disabled="sendingReport">
+        {{ sendingReport ? '📤 Sending...' : '📤 Send Daily Report to Discord' }}
+      </button>
+      <small v-if="lastReportSent" class="report-status">
+        ✅ Last sent: {{ lastReportSent }}
+      </small>
+    </div>
+
     <!-- Data Refresh -->
     <div class="footer">
       <small>Last updated: {{ lastUpdate }}</small>
@@ -117,6 +129,8 @@ import { ref, computed, onMounted } from 'vue'
 
 const analytics = ref({})
 const lastUpdate = ref(new Date().toLocaleTimeString())
+const sendingReport = ref(false)
+const lastReportSent = ref(null)
 
 const backendUrl = computed(() => {
   const proto = location.protocol
@@ -155,6 +169,28 @@ const calculateBarHeight = (cost) => {
 const formatDate = (dateStr) => {
   const date = new Date(dateStr)
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+const sendDailyReport = async () => {
+  sendingReport.value = true
+  try {
+    const resp = await fetch(`${backendUrl.value}/api/analytics/report-to-discord`, {
+      method: 'POST'
+    })
+    const data = await resp.json()
+    
+    if (data.success) {
+      lastReportSent.value = new Date().toLocaleTimeString()
+      alert('✅ Daily cost report sent to Discord!')
+    } else {
+      alert(`❌ Failed to send report: ${data.message}`)
+    }
+  } catch (err) {
+    console.error('Failed to send report:', err)
+    alert(`❌ Error: ${err.message}`)
+  } finally {
+    sendingReport.value = false
+  }
 }
 
 // Initialize on mount
@@ -407,5 +443,54 @@ h3 {
 
 .btn-refresh-small:hover {
   background: #4f6095;
+}
+
+.daily-report-section {
+  padding: 1rem;
+  background: #1a1f3a;
+  border: 1px solid #3b4a6f;
+  border-radius: 6px;
+  margin: 0 1rem 1rem 1rem;
+}
+
+.daily-report-section h3 {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.95rem;
+}
+
+.daily-report-section p {
+  margin: 0 0 1rem 0;
+  font-size: 0.85rem;
+  color: #94a3b8;
+}
+
+.btn-send-report {
+  width: 100%;
+  padding: 0.75rem;
+  background: #10b981;
+  border: none;
+  border-radius: 4px;
+  color: #0f1419;
+  font-weight: bold;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-send-report:hover:not(:disabled) {
+  background: #059669;
+  transform: scale(1.02);
+}
+
+.btn-send-report:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.report-status {
+  display: block;
+  margin-top: 0.75rem;
+  color: #10b981;
+  font-size: 0.75rem;
 }
 </style>

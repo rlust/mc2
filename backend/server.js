@@ -331,6 +331,142 @@ app.get('/api/alerts', async (req, res) => {
   res.json({ alerts: alerts.slice(0, 10) });
 });
 
+// Generate cost summary report
+app.get('/api/analytics/summary', async (req, res) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const last7Days = costHistory.slice(-7);
+    
+    // Today's totals
+    const todayData = costHistory.find(h => h.date === today) || { cost: 0, inputTokens: 0, outputTokens: 0 };
+    
+    // Calculate metrics
+    const avg7d = last7Days.length > 0 
+      ? (last7Days.reduce((sum, h) => sum + h.cost, 0) / last7Days.length).toFixed(2)
+      : 0;
+    
+    const projectedMonthly = (parseFloat(avg7d) * 30).toFixed(2);
+    const budgetThreshold = 100;
+    const budgetStatus = projectedMonthly > budgetThreshold ? '⚠️ OVER' : '✅ UNDER';
+    
+    // Build summary message
+    const dailyCost = parseFloat(todayData.cost).toFixed(2);
+    const summary = {
+      date: today,
+      dailyCost,
+      avg7d,
+      projectedMonthly,
+      budgetThreshold,
+      budgetStatus,
+      last7Days: last7Days.map(h => ({
+        date: h.date,
+        cost: parseFloat(h.cost).toFixed(2)
+      })),
+      trend: parseFloat(dailyCost) > parseFloat(avg7d) ? '📈 UP' : '📉 DOWN'
+    };
+    
+    res.json(summary);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Send daily cost report to Discord
+app.post('/api/analytics/report-to-discord', async (req, res) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const last7Days = costHistory.slice(-7);
+    
+    // Today's totals
+    const todayData = costHistory.find(h => h.date === today) || { cost: 0, inputTokens: 0, outputTokens: 0 };
+    
+    // Calculate metrics
+    const avg7d = last7Days.length > 0 
+      ? (last7Days.reduce((sum, h) => sum + h.cost, 0) / last7Days.length).toFixed(2)
+      : 0;
+    
+    const projectedMonthly = (parseFloat(avg7d) * 30).toFixed(2);
+    const budgetThreshold = 100;
+    const budgetStatus = projectedMonthly > budgetThreshold ? '⚠️ OVER' : '✅ UNDER';
+    const dailyCost = parseFloat(todayData.cost).toFixed(2);
+    const trend = parseFloat(dailyCost) > parseFloat(avg7d) ? '📈 UP' : '📉 DOWN';
+    
+    // Generate simple bar chart for 7-day data
+    const maxCost = Math.max(...last7Days.map(h => h.cost), 0.1);
+    const barChart = last7Days.map(h => {
+      const barLength = Math.round((h.cost / maxCost) * 10);
+      const bar = '█'.repeat(barLength) + '░'.repeat(10 - barLength);
+      const date = h.date.split('-')[2]; // Just day number
+      return `${date}: ${bar} $${parseFloat(h.cost).toFixed(2)}`;
+    }).join('\n');
+    
+    const discordWebhook = process.env.DISCORD_WEBHOOK_URL;
+    
+    if (discordWebhook) {
+      const response = await fetch(discordWebhook, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          embeds: [{
+            title: '💰 Daily Cost Summary Report',
+            color: 16776960, // Yellow
+            fields: [
+              {
+                name: '📊 Today\'s Cost',
+                value: `$${dailyCost}`,
+                inline: true
+              },
+              {
+                name: '📈 7-Day Average',
+                value: `$${avg7d}`,
+                inline: true
+              },
+              {
+                name: '🔮 Projected Monthly',
+                value: `$${projectedMonthly}`,
+                inline: true
+              },
+              {
+                name: '💡 Budget Status',
+                value: `${budgetStatus} (Threshold: $${budgetThreshold})`,
+                inline: true
+              },
+              {
+                name: '📉 Trend',
+                value: trend,
+                inline: true
+              },
+              {
+                name: '\u200b',
+                value: '\u200b',
+                inline: false
+              },
+              {
+                name: '📋 7-Day Breakdown',
+                value: '```\n' + barChart + '\n```',
+                inline: false
+              }
+            ],
+            timestamp: new Date().toISOString()
+          }]
+        })
+      });
+      
+      if (response.ok) {
+        console.log(`✅ Daily cost report sent to Discord`);
+        res.json({ success: true, message: 'Report sent to Discord' });
+      } else {
+        console.error(`Discord API error: ${response.status}`);
+        res.json({ success: false, message: 'Discord API error', status: response.status });
+      }
+    } else {
+      res.json({ success: false, message: 'Discord webhook not configured' });
+    }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Get cost analytics
 app.get('/api/analytics', async (req, res) => {
   try {
